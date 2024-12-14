@@ -8,6 +8,7 @@ bitsxmarató
   - Solo 5 tienen más de una entrada en el dataset
 - Binary diagnosis. IPF / No IPF (IPF = Fibrosis Pulmonar Idiopática)
   - Imagino que representa si el médico le ha diagnosticado la enfermedad
+  - 1 = sí tiene, else no
 - Details: 
   - Super generico: 'Tobacco-associated' nan 'Organizing' 'Incipient' 'RA-SLE' 'RA' 'Anti-synthetase' 'Aviary' "Farmer's lung" 'Fungi' 'Aviary, Fungi' 'Unknown' 'Humidity'
   - Muchos NA
