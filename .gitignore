@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Folder of environment analisis
+EDA/
+
 # Distribution / packaging
 .Python
 build/
@@ -25,6 +28,10 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Datos
+FibroPredCODIFICADA.xlsx
+.~lock.FibroPredCODIFICADA.xlsx#
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
