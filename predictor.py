@@ -56,14 +56,32 @@ class Predictor:
         - X: pandas DataFrame of features.
         - y: pandas Series of target.
         """
-        # Identify numeric and categorical columns
+        # Identify numeric columns (excluding binary)
         num_cols = X.select_dtypes(include=['float64', 'int64']).columns.tolist()
-        cat_cols = X.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
 
-        # Define transformers for numeric and categorical data
+        # Identify binary numeric columns (with values 0 and 1)
+        binary_num_cols = [col for col in num_cols if X[col].nunique() == 2 and set(X[col].unique()) <= {0, 1}]
+        num_cols = [col for col in num_cols if col not in binary_num_cols]
+
+        # Identify categorical columns
+        cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
+
+        # Identify binary categorical columns (with two unique values)
+        binary_cat_cols = [col for col in cat_cols if X[col].nunique() == 2]
+        cat_cols = [col for col in cat_cols if col not in binary_cat_cols]
+
+        # Combine all binary columns
+        binary_cols = binary_num_cols + binary_cat_cols
+
+        # Define transformers for numeric, binary, and categorical data
         numeric_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='mean')),
             ('scaler', StandardScaler())
+        ])
+
+        binary_transformer = Pipeline(steps=[
+            ('imputer', SimpleImputer(strategy='most_frequent'))
+            # No scaling or encoding for binary columns
         ])
 
         categorical_transformer = Pipeline(steps=[
@@ -75,6 +93,7 @@ class Predictor:
         self.preprocessor = ColumnTransformer(
             transformers=[
                 ('num', numeric_transformer, num_cols),
+                ('binary', binary_transformer, binary_cols),
                 ('cat', categorical_transformer, cat_cols)
             ]
         )
@@ -94,18 +113,18 @@ class Predictor:
 
         param_grids = {
             'RandomForest': {
-                'feature_selector__k': [5, 10, 15, 20, 25, 30, 35, 40, 45, 'all'],
+                'feature_selector__k': [5, 10, 15, 20, 25, 30, 'all'],
                 'classifier__n_estimators': [100, 200],
                 'classifier__max_depth': [None, 5, 10],
                 'classifier__min_samples_split': [2, 5],
             },
             'AdaBoost': {
-                'feature_selector__k': [5, 10, 15, 20, 25, 30, 35, 40, 45, 'all'],
+                'feature_selector__k': [5, 10, 15, 20, 25, 30, 'all'],
                 'classifier__n_estimators': [50, 100, 200],
                 'classifier__learning_rate': [0.5, 1.0, 1.5]
             },
             'LogisticRegression': {
-                'feature_selector__k': [5, 10, 15, 20, 25, 30, 35, 40, 45, 'all'],
+                'feature_selector__k': [5, 10, 15, 20, 25, 30, 'all'],
                 'classifier__C': [0.1, 1.0, 10],
                 'classifier__penalty': ['l2'],
                 'classifier__solver': ['lbfgs']
@@ -115,7 +134,7 @@ class Predictor:
         # Set up the overall pipeline structure
         self.pipeline = Pipeline(steps=[
             ('preprocessor', self.preprocessor),
-            ('variance_threshold', variance_threshold),  # Add VarianceThreshold here
+            ('variance_threshold', variance_threshold),
             ('feature_selector', feature_selector),
             ('classifier', None)  # Placeholder, will be set in GridSearchCV
         ])
@@ -149,36 +168,43 @@ class Predictor:
         print(f"Best {self.scoring_metric.upper()} score: {best_score:.4f}")
 
         # Retrieve feature names after preprocessing and feature selection
-        self._get_feature_names(num_cols, cat_cols)
+        self._get_feature_names(num_cols, binary_cols, cat_cols)
 
         # Print feature importances or coefficients
         self._print_feature_importances(best_classifier_name)
 
-    def _get_feature_names(self, num_cols, cat_cols):
+    def _get_feature_names(self, num_cols, binary_cols, cat_cols):
         """
         Retrieve feature names after preprocessing, variance thresholding, and feature selection.
 
         Parameters:
         - num_cols: list of numeric column names.
+        - binary_cols: list of binary column names.
         - cat_cols: list of categorical column names.
         """
-        # Get names from numeric features
-        feature_names = []
-        if num_cols:
-            feature_names.extend(num_cols)
+        # Get feature names from numeric transformer
+        num_features = num_cols
 
-        # Get names from categorical features after one-hot encoding
+        # Get feature names from binary transformer (should be the same as binary_cols)
+        binary_features = binary_cols
+
+        # Get feature names from categorical transformer (after one-hot encoding)
         if cat_cols:
             ohe = self.best_model.named_steps['preprocessor'].named_transformers_['cat'].named_steps['onehot']
             ohe_features = ohe.get_feature_names_out(cat_cols)
-            feature_names.extend(ohe_features)
+            cat_features = ohe_features
+        else:
+            cat_features = []
+
+        # Combine all feature names
+        feature_names = np.array(num_features + binary_features + list(cat_features))
 
         # Get support mask from variance threshold
         vt = self.best_model.named_steps['variance_threshold']
         vt_mask = vt.get_support()
 
         # Apply the variance threshold mask to feature names
-        feature_names_vt = np.array(feature_names)[vt_mask]
+        feature_names_vt = feature_names[vt_mask]
 
         # Get support mask from feature selector
         selector = self.best_model.named_steps['feature_selector']

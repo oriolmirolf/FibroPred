@@ -92,8 +92,20 @@ class DataCleaner:
         else:
             print("Warning: 'Progressive disease' column not found.")
 
+    def handle_missing_values(self):
+        # Identify numeric and categorical columns
+        numeric_cols = self.df.select_dtypes(include=['float64', 'int64']).columns
+        categorical_cols = self.df.select_dtypes(include=['object', 'bool', 'category']).columns
+
+        # Impute numeric columns with median
+        self.df[numeric_cols] = self.df[numeric_cols].fillna(self.df[numeric_cols].median())
+
+        # Impute categorical columns with mode
+        self.df[categorical_cols] = self.df[categorical_cols].fillna(self.df[categorical_cols].mode().iloc[0])
+
     def clean(self, selected_features, features_to_drop):
         self.drop_features(features_to_drop)
+        self.handle_missing_values()
         self.telomeric_illness()
         self.neoplastia()
         self.hematological()
