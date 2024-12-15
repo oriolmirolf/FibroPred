@@ -75,7 +75,7 @@ def run():
         return
 
     # Intersection for Progressive Disease
-    intersection_features = list(set(selected_features_prog).intersection(set(selected_features_event)))
+    intersection_features = list(set(selected_features_prog).union(set(selected_features_event)))
 
     # Load data
     data_path = 'data/FibroPredCODIFICADA.xlsx'
@@ -199,10 +199,10 @@ def run():
         st.write(f"Uncertainty: {uncertainty:.2f}%")
 
     def predict_progressive(df_to_predict):
-        missing_feats = [f for f in intersection_features if f not in df_to_predict.columns]
+        missing_feats = [f for f in selected_features_prog if f not in df_to_predict.columns]
         for mf in missing_feats:
-            df_to_predict[mf] = np.nan
-        prog_prob = progressive_model.predict_proba(df_to_predict[intersection_features])[:, 1]
+            df_to_predict[mf] = df_clean[mf].median()
+        prog_prob = progressive_model.predict_proba(df_to_predict[selected_features_prog])[:, 1]
         prog_pred = (prog_prob >= 0.5).astype(int)
         return prog_pred, prog_prob
 
@@ -213,7 +213,7 @@ def run():
             return None, None
         missing_feats = [f for f in selected_features_event if f not in df_to_predict.columns]
         for mf in missing_feats:
-            df_to_predict[mf] = np.nan
+            df_to_predict[mf] = df_clean[mf].median()
         event_prob = event_model.predict_proba(df_to_predict[selected_features_event])[:, 1]
         event_pred = (event_prob >= 0.5).astype(int)
         return event_pred, event_prob
@@ -242,7 +242,8 @@ def run():
                 user_row.at[0,f] = v
         # Now append to original df and clean again
         combined = pd.concat([df, user_row], ignore_index=True)
-        combined_clean = cleaner.clean(selected_features=selected_features_default, features_to_drop=features_to_drop)
+        inp_cleaner = DataCleaner(combined)
+        combined_clean = inp_cleaner.clean(selected_features=selected_features_default, features_to_drop=[])
         if combined_clean.isnull().sum().sum() > 0:
             combined_clean.fillna(combined_clean.median(), inplace=True)
         # The last row in combined_clean corresponds to user input cleaned
@@ -335,6 +336,7 @@ def run():
                     with cols[1]:
                         st.write("**Note on Feature Importances:**")
                         st.info("Feature importances not shown for individual predictions.")
+
 
                 else:  # Event
                     prog_pred, prog_prob = predict_progressive(cleaned_user_row)
