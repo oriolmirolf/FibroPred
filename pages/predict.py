@@ -10,7 +10,6 @@ import seaborn as sns
 import os
 import json
 from sklearn.metrics import roc_curve, auc, confusion_matrix, f1_score
-from sklearn.inspection import permutation_importance
 from math import ceil
 
 def plot_confusion_matrix(cm, title):
@@ -21,7 +20,6 @@ def plot_confusion_matrix(cm, title):
     ax.set_title(title)
     plt.tight_layout()
     return fig
-
 
 def plot_roc_curve(y_true, y_proba, title):
     fpr, tpr, _ = roc_curve(y_true, y_proba)
@@ -39,7 +37,6 @@ def plot_roc_curve(y_true, y_proba, title):
     plt.tight_layout()
     return fig
 
-
 def load_selected_features(path):
     try:
         with open(path, 'r') as f:
@@ -48,7 +45,6 @@ def load_selected_features(path):
     except Exception as e:
         st.error(f"Error loading selected features from `{path}`: {e}")
         return []
-
 
 def run():
     st.header("Predict")
@@ -122,7 +118,6 @@ def run():
             'Liver Problem', 'TERT', 'Final diagnosis', 'Event'
         ]
 
-        # Clean entire dataset
         df_clean = cleaner.clean(selected_features=selected_features_default, features_to_drop=features_to_drop)
         if df_clean.isnull().sum().sum() > 0:
             df_clean.fillna(df_clean.median(), inplace=True)
@@ -144,8 +139,6 @@ def run():
         return
 
     # Determine categorical vs numeric features
-    # A feature is considered categorical if dtype is object or if unique values < 10
-    # We'll use df_clean for determining this, as it's the cleaned dataset
     categorical_features = []
     numeric_features = []
     for f in input_features:
@@ -159,7 +152,6 @@ def run():
             # If feature not in df_clean, assume numeric
             numeric_features.append(f)
 
-    # Initialize session state for inputs
     if 'user_input' not in st.session_state:
         st.session_state.user_input = {}
 
@@ -178,13 +170,11 @@ def run():
             if feature_index < len(input_features):
                 f = input_features[feature_index]
                 if f in categorical_features:
-                    # Dropdown
                     options = df_clean[f].dropna().unique().tolist()
                     if len(options) == 0:
                         options = [""]  # fallback
                     st.session_state.user_input[f] = c.selectbox(f, options, index=options.index(st.session_state.user_input[f]) if st.session_state.user_input[f] in options else 0)
                 else:
-                    # Numeric
                     val = st.session_state.user_input[f]
                     if not isinstance(val, (int,float)):
                         val = 0.0
@@ -218,35 +208,24 @@ def run():
         event_pred = (event_prob >= 0.5).astype(int)
         return event_pred, event_prob
 
-    # Buttons
     colA, colB = st.columns(2)
     with colA:
         predict_manual = st.button("Predict with Input Data")
     with colB:
         predict_random = st.button("Load Random Patient")
 
-    # Function to get cleaned single row from user input
     def get_cleaned_input_row(user_data):
-        # user_data is a dict of {feature: value} in original format
-        # We must integrate this user_data into the original df and re-run cleaning
-        # We'll create a single-row df with all selected_features_default
-        # and set user_data features accordingly. Others as NaN.
-
-        # Prepare a single row based on selected_features_default
         user_row = pd.DataFrame(columns=selected_features_default)
         user_row.loc[0] = [np.nan]*len(selected_features_default)
 
-        # Assign user inputs
         for f, v in user_data.items():
             if f in user_row.columns:
                 user_row.at[0,f] = v
-        # Now append to original df and clean again
         combined = pd.concat([df, user_row], ignore_index=True)
         inp_cleaner = DataCleaner(combined)
         combined_clean = inp_cleaner.clean(selected_features=selected_features_default, features_to_drop=[])
         if combined_clean.isnull().sum().sum() > 0:
             combined_clean.fillna(combined_clean.median(), inplace=True)
-        # The last row in combined_clean corresponds to user input cleaned
         cleaned_user_row = combined_clean.iloc[[-1]].copy()
         return cleaned_user_row
 
@@ -254,118 +233,92 @@ def run():
         with st.spinner("Loading random patient..."):
             try:
                 random_patient = df_clean.sample(n=1)
-                # Extract original values from df (we must go back to original df because df_clean might have transformed data)
-                # Actually, df_clean should contain original columns after cleaning. 
-                # We'll just read from df_clean. The user wants original format, but we only have cleaned data here.
-                # We'll assume df_clean didn't drastically alter categorical values. If it did, you'd need original df mapping.
-                # For safety, let's revert to 'df' for raw values:
-                # We'll match them by index. 
-                # Problem: after cleaning, indexes might differ. We'll rely on df_clean having same indices as df:
-                # The cleaning might have dropped rows. If so, we must rely on a stable index. We assume no row was dropped and indices match.
-
-                # If indices don't match, consider merging on an unique ID if available.
-                # For now, assume indices match:
                 idx = random_patient.index[0]
                 original_row = df.loc[idx]
 
-                # Update st.session_state.user_input with this patient's original values if available:
-                # If a categorical feature isn't present or numeric, fallback gracefully
+                # Update st.session_state.user_input with this patient's values
                 for f in input_features:
                     if f in original_row:
                         val = original_row[f]
-                        # If categorical and val not in options, fallback
+                        if pd.isnull(val):
+                            val = 0.0 if f in numeric_features else ""
                         if f in categorical_features:
                             options = df_clean[f].dropna().unique().tolist()
                             if val not in options:
-                                # fallback to first option
                                 val = options[0] if options else ""
-                        if pd.isnull(val):
-                            val = 0.0 if f in numeric_features else ""
                         st.session_state.user_input[f] = val
 
+                # Store the random patient data (with true labels) for later reference
+                st.session_state.last_random_patient = original_row.to_frame().T
+                st.session_state.random_loaded = True
+
                 st.success("Random patient loaded. You can now click 'Predict with Input Data'.")
+                st.rerun()
             except Exception as e:
                 st.error(f"Error loading random patient: {e}")
+
+    if 'random_loaded' not in st.session_state:
+        st.session_state.random_loaded = False
+
+    def show_true_value(row, col_name, label_name):
+        if col_name == "Event":
+            val_death = row["Death"].values[0] if "Death" in row.columns else np.nan
+            val_transplant = row["Necessity_of_transplantation"].values[0] if "Necessity_of_transplantation" in row.columns else np.nan
+
+            # If both death and transplant necessity are 0 or NaN, show 0
+            if (pd.isnull(val_death) or val_death == "No") and (pd.isnull(val_transplant) or val_transplant == 0):
+                st.write(f"**True {label_name} Value:** 0 (No death or no necessity of transplantation)")
+            else:
+                # Otherwise, at least one event (death or transplant) is indicated
+                st.write(f"**True {label_name} Value:** 1 (Death or necessity of transplantation)")
+            
+            return
+        elif col_name in row.columns:
+            val = row[col_name].values[0]
+
+            # For other columns, default positive/negative logic
+            if pd.isnull(val):
+                st.write(f"**True {label_name} Value:** Not Available")
+            else:
+                st.write(f"**True {label_name} Value:** {'Positive' if val == 1 else 'Negative'}")
+        else:
+            st.write(f"**True {label_name} Value:** Not Available")
+
 
     if predict_manual:
         with st.spinner('Making predictions...'):
             try:
-                # Construct user_data from session_state
                 user_data = {f: st.session_state.user_input[f] for f in input_features}
-                # Get cleaned row
                 cleaned_user_row = get_cleaned_input_row(user_data)
 
-                # Extract target values if random patient or not:
-                # We can't know if it's random or not easily here, 
-                # but we can just skip true values if we didn't load random patient.
-                # If random patient was loaded, user_input was updated accordingly.
-                # True values are unknown for arbitrary input. For random patient:
-                # If user did random patient -> predict manual -> we still have same user_input.
-                # We won't show true values unless we can detect random selection.
-                # Let's store a flag in session state if random patient was loaded:
-                if 'random_loaded' not in st.session_state:
-                    st.session_state.random_loaded = False
-                if predict_random:
-                    st.session_state.random_loaded = True
+                st.subheader("Prediction Results")
 
-                true_prog = None
-                true_event = None
-                if st.session_state.random_loaded:
-                    # If random loaded, we know the last random patient chosen
-                    # Actually, we didn't store the random patient globally. 
-                    # We can store it in session_state when random_loaded is clicked.
-                    # Let's do that above:
-                    pass
-
-                # Just predict now:
                 if target_choice == 'Progressive disease':
                     prog_pred, prog_prob = predict_progressive(cleaned_user_row)
-                    st.subheader("Prediction Results")
-                    cols = st.columns(2)
-                    with cols[0]:
-                        display_results("Progressive Disease", prog_pred[0], prog_prob[0])
-                        # If random_loaded and we still have random_patient:
-                        if st.session_state.get('random_loaded', False):
-                            # We must have stored random_patient globally:
-                            # Let's store random_patient in session after loading:
-                            # We'll do it now:
-                            if 'last_random_patient' in st.session_state:
-                                true_prog = st.session_state.last_random_patient['Progressive disease'].values[0]
-                                if true_prog is not None:
-                                    st.write(f"**True Progressive Disease Value:** {'Positive' if true_prog == 1 else 'Negative'}")
-                    with cols[1]:
-                        st.write("**Note on Feature Importances:**")
-                        st.info("Feature importances not shown for individual predictions.")
+                    display_results("Progressive Disease", prog_pred[0], prog_prob[0])
 
+                    if st.session_state.random_loaded and 'last_random_patient' in st.session_state:
+                        show_true_value(st.session_state.last_random_patient, 'Progressive disease', 'Progressive Disease')
 
-                else:  # Event
+                else:
+                    # Predict progressive first, then event
                     prog_pred, prog_prob = predict_progressive(cleaned_user_row)
                     event_pred, event_prob = predict_event(cleaned_user_row.copy(), prog_prob)
+
                     if event_pred is not None:
-                        st.subheader("Prediction Results")
-                        cols = st.columns(2)
-                        with cols[0]:
-                            st.write("**Progressive Disease Probability**")
-                            st.write(f"Probability: {prog_prob[0]:.4f}")
-                            st.write(f"Uncertainty: {(1 - prog_prob[0])*100:.2f}%")
-                            if st.session_state.get('random_loaded', False) and 'last_random_patient' in st.session_state:
-                                true_prog = st.session_state.last_random_patient['Progressive disease'].values[0]
-                                if true_prog is not None:
-                                    st.write(f"**True Progressive Disease Value:** {'Positive' if true_prog == 1 else 'Negative'}")
-                        with cols[1]:
-                            display_results("Event (Death/Transplantation)", event_pred[0], event_prob[0])
-                            if st.session_state.get('random_loaded', False) and 'last_random_patient' in st.session_state:
-                                true_event = st.session_state.last_random_patient['Event'].values[0]
-                                if true_event is not None:
-                                    st.write(f"**True Event Value:** {'Positive' if true_event == 1 else 'Negative'}")
+                        st.write("**Progressive Disease Probability (Used as input for Event model)**")
+                        st.write(f"Probability: {prog_prob[0]:.4f}")
+                        st.write(f"Uncertainty: {(1 - prog_prob[0])*100:.2f}%")
+
+                        if st.session_state.random_loaded and 'last_random_patient' in st.session_state:
+                            show_true_value(st.session_state.last_random_patient, 'Progressive disease', 'Progressive Disease')
+
+                        display_results("Event (Death/Transplantation)", event_pred[0], event_prob[0])
+
+                        if st.session_state.random_loaded and 'last_random_patient' in st.session_state:
+                            show_true_value(st.session_state.last_random_patient, 'Event', 'Event')
+
+                            print(st.session_state.last_random_patient.columns)
 
             except Exception as e:
                 st.error(f"Error during prediction: {e}")
-
-    # When we load a random patient, store in session state for future reference:
-    if predict_random and 'random_patient' in locals():
-        # Store random_patient as last_random_patient for displaying true values after prediction
-        st.session_state.last_random_patient = random_patient
-        st.session_state.random_loaded = True
-    elif 'random_loaded' not in st.session_state:
-        st.session_state.random_loaded = False
